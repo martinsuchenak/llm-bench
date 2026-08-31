@@ -1,0 +1,12 @@
+{
+  "prompt": "We need to add rate-limited webhook delivery to an existing Go monolith that already has a job queue and Postgres. Users register HTTP endpoints; our system must call them reliably, within per-customer rate limits.\n\nBefore any implementation: (1) list the clarifying questions you would ask first, ranked by how much the answers would change the design; (2) identify the two or three core design decisions and the trade-offs of each; (3) sketch a brief design (components, data model, failure handling) once you have stated your assumptions. Keep it under ~600 words.",
+  "system": "You are a pragmatic senior engineer. Surface assumptions and trade-offs explicitly; ask questions before inventing requirements.",
+  "max_tokens": 2000,
+  "temperature": 0.7,
+  "timeout": 180,
+  "targets": [
+    {"provider": "anthropic", "model": "claude-sonnet-4-5"},
+    {"provider": "google", "model": "gemini-2.5-pro"},
+    {"provider": "zai", "model": "glm-4.7"}
+  ]
+}

@@ -1,0 +1,6 @@
+{
+  "prompt": "Review this Python function. Report only real defects (bugs, resource leaks, surprising cross-call behavior), each with severity, a one-line explanation, and a suggested fix. If something looks unusual but is correct, say so explicitly or leave it out. End with a one-line overall verdict.\n\n```python\nimport json\n\ndef load_config(path, cache={}):\n    if path not in cache:\n        f = open(path)\n        cache[path] = json.load(f)\n    return cache[path]\n```",
+  "system": "You are a calibrated code reviewer: neither rubber-stamping nor nitpicking. Real defects only, with evidence.",
+  "max_tokens": 800,
+  "temperature": 0.2
+}

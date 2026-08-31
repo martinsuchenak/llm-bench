@@ -1,0 +1,6 @@
+{
+  "prompt": "Summarize the following internal update for the engineering team. Preserve every decision, deadline, owner, and numeric constraint; compress wording, not information. Maximum 6 bullets.\n\n---\nProject Falcon update, week 34: The API migration is 80% complete; the remaining 20% (the legacy /v1 billing routes) will move next sprint, deadline Sept 12 - Sara owns this. We are NOT migrating the webhooks subsystem after all; the earlier decision from week 30 is reversed because the vendor shipped compatibility, so webhooks stay on the old stack at least through Q1. Budget: we overspent the migration budget by $12k of the $80k allocated; the overage went to extra contract QA. Infra note: p99 latency on the new API is 340ms, above our 250ms SLO - Li's team has a fix in review, targeting Sept 2. Security audit passed with one medium finding (token rotation on the admin panel), fix due Sept 20, owner: Dev. Hiring: one more backend req approved, start the loop by Friday.\n---",
+  "system": "You are a precise technical summarizer. Faithfulness over polish: a summary that drops a load-bearing detail is a failure.",
+  "max_tokens": 700,
+  "temperature": 0.3
+}

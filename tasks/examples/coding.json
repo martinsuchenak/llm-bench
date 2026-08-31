@@ -1,0 +1,6 @@
+{
+  "prompt": "A teammate reports that this Python helper misbehaves for some inputs:\n\n```python\ndef chunked(items, n):\n    return [items[i:i + n] for i in range(0, len(items), n)]\n```\n\nThey claim `chunked([], 5)` and `chunked([1, 2, 3], 0)` are both broken. Determine which of the reported inputs are actually broken (if any), explain why, provide the corrected function, and add two short assertions that demonstrate the fix. Keep the change minimal: no refactoring, no new dependencies.",
+  "system": "You are a meticulous software engineer. Answer precisely; do not fix things that are not broken.",
+  "max_tokens": 800,
+  "temperature": 0.2
+}

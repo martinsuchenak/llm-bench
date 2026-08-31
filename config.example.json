@@ -1,0 +1,39 @@
+{
+  "providers": {
+    "anthropic": {
+      "type": "anthropic",
+      "base_url": "https://api.anthropic.com/v1",
+      "api_key_env": "ANTHROPIC_API_KEY"
+    },
+    "google": {
+      "type": "google",
+      "base_url": "https://generativelanguage.googleapis.com/v1beta",
+      "api_key_env": "GEMINI_API_KEY"
+    },
+    "zai": {
+      "type": "openai",
+      "base_url": "https://api.z.ai/api/paas/v4",
+      "api_key_env": "ZAI_API_KEY"
+    },
+    "local": {
+      "type": "openai",
+      "base_url": "http://localhost:11434/v1",
+      "api_key_env": "LOCAL_API_KEY",
+      "max_retries": 4,
+      "retry_backoff": 8
+    }
+  },
+  "default_targets": [
+    {"provider": "anthropic", "model": "claude-sonnet-4-5"},
+    {"provider": "google", "model": "gemini-2.5-pro"},
+    {"provider": "zai", "model": "glm-4.7"},
+    {"provider": "local", "model": "qwen3:8b"}
+  ],
+  "judge_target": {
+    "provider": "anthropic",
+    "model": "claude-sonnet-4-5",
+    "max_tokens": 4096
+  },
+  "max_parallel": 4,
+  "output_dir": "outputs"
+}

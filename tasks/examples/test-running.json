@@ -1,0 +1,13 @@
+{
+  "prompt": "A CI run failed and you are asked to triage it. Here is the complete output:\n\n```\n============================= test session starts ==============================\nplatform darwin -- Python 3.12.3\ncollecting ... collected 3 items\n\ntest_worker.py::test_add PASSED                                           [ 33%]\ntest_worker.py::test_subtract PASSED                                      [ 66%]\ntest_worker.py::test_multiply FAILED                                      [100%]\n\n=================================== FAILURES ===================================\n_________________________________ test_multiply _________________________________\n\n    def test_multiply():\n>       assert multiply(2, 3) == 6\nE       assert 18 == 6\n\ntest_worker.py:22: AssertionError\n=========================== short test summary info =============================\nFAILED test_worker.py::test_multiply - assert 18 == 6\n========================= 1 failed, 2 passed in 0.03s ==========================\n```\n\nThe implementation under test:\n\n```python\ndef add(a, b):\n    return a + b\n\ndef subtract(a, b):\n    return a - b\n\ndef multiply(a, b):\n    return a * b * 3  # TODO: remove the 3x factor once the promo pricing hack ships\n```\n\nAnswer: (1) What exactly failed and why, in one sentence? (2) What is the correct minimal fix, and does it belong in the test or the implementation? (3) Is anything else in this setup suspicious for future CI runs? Do not guess about information that is not shown.",
+  "system": "You are a careful test-triage engineer. Interpret failures strictly from the evidence shown; never invent details.",
+  "max_tokens": 900,
+  "temperature": 0.2,
+  "timeout": 90,
+  "targets": [
+    {"provider": "anthropic", "model": "claude-sonnet-4-5"},
+    {"provider": "google", "model": "gemini-2.5-pro"},
+    {"provider": "zai", "model": "glm-4.7"},
+    {"provider": "local", "model": "qwen3:8b"}
+  ]
+}

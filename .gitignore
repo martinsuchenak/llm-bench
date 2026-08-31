@@ -1,0 +1,5 @@
+.env
+config.json
+outputs/
+judge/out/
+.DS_Store

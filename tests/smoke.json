@@ -1,0 +1,18 @@
+{
+  "prompt": "smoke test prompt - verifies ok, error, and config_error paths against the mock server",
+  "max_tokens": 64,
+  "temperature": 0.5,
+  "timeout": 3,
+  "targets": [
+    {"provider": "anthropic", "model": "smoke-claude"},
+    {"provider": "google", "model": "smoke-gemini"},
+    {"provider": "zai", "model": "smoke-glm"},
+    {"provider": "local", "model": "smoke-local-qwen"},
+    {"provider": "anthropic", "model": "smoke-http500"},
+    {"provider": "google", "model": "smoke-badjson"},
+    {"provider": "zai", "model": "smoke-slow"},
+    {"provider": "local", "model": "smoke-empty"},
+    {"provider": "dead", "model": "smoke-dead"},
+    {"provider": "nonexistent", "model": "smoke-unknown"}
+  ]
+}
