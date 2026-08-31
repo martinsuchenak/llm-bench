@@ -2,4 +2,7 @@
 config.json
 outputs/
 judge/out/
+# Real bench tasks stay private (public repo); only tasks/examples/ is committed
+tasks/*
+!tasks/examples/
 .DS_Store

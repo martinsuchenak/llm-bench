@@ -129,8 +129,9 @@ task's `targets`.
 
 ### Task files (`tasks/*.json`)
 
-Your tasks live directly in `tasks/` (committed, so the bench suite stays
-versioned); the five shipped **example** tasks live in `tasks/examples/` —
+Your tasks live directly in `tasks/` — **gitignored** (this is a public
+repo; keep your bench prompts private). The five shipped **example** tasks
+live in `tasks/examples/`, which is the only committed part of `tasks/`:
 run them with `scriptling runner.py tasks/examples`, or copy one as a
 template for a new task. Directory scans are **not recursive**, so a plain
 `scriptling runner.py tasks` runs only your tasks and never the examples.
