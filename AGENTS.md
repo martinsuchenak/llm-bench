@@ -20,11 +20,11 @@ by actually running it (see Verification); do not trust Python instincts.
 | `config.json` | Live config, copied from the example by the user. Gitignored — never commit it or mention real endpoints in it. |
 | `.env` / `.env.example` | API keys. The scriptling CLI auto-loads `.env` from the CWD. Never commit `.env`; never write keys into outputs. |
 | `tasks/*.json` | Your real bench tasks — **gitignored** (public repo, private prompts). `prompt` required; optional `system`, `max_tokens`, `temperature`, `timeout`, `targets` (overrides `default_targets`). |
-| `tasks/examples/*.json` | The five shipped scenario examples (coding, code-review, test-running, feature-design, summarization). Directory scans are NOT recursive: `runner.py tasks` never picks these up; run them explicitly via `tasks/examples`. Test-only tasks (mock-provider `smoke.json`) live in `tests/` for the same reason. |
+| `tasks/examples/*.json` | The five shipped scenario examples (coding, code-review, test-running, feature-design, summarization). Directory scans are NOT recursive: `runner.py tasks` never picks these up; run them explicitly via `tasks/examples`. Test-only tasks (mock-provider `smoke.json`, `samples.json`) live in `tests/` for the same reason. |
 | `judge/prompt.md` | LLM-as-judge prompt: blind comparison rubric + strict-JSON verdict. Placeholders `{{TASK}}`/`{{CANDIDATES}}`/`{{NOTES}}`; candidates must be anonymized (provider/model stripped, random labels) before judging. |
 | `judge/run.py` | Judge automation: task/run file → latest run → anonymized+shuffled candidates → judge call via `scriptling.ai` → verdict + de-anonymized merge into `judge/out/` (gitignored). Also accepts a pasted judge verdict as input (raw JSON or a CLI reply with prose/fences) and merges it with the sibling `mapping.json` — merge mode for CLI-tool judges (claude/gemini/kiro). Same fatal-die-in-main-frame rule as runner.py; fatal validation lives only in `main()`. |
 | `outputs/` | Generated results (gitignored). |
-| `tests/mock_server.py` | Python stdlib mock of all three provider dialects, with failure-mode directives. Test infrastructure only. |
+| `tests/mock_server.py` | Python stdlib mock of all three provider dialects, with failure- and judge-mode directives. Test infrastructure only. |
 
 ## Architecture (deliberate decisions — don't undo without cause)
 
@@ -43,6 +43,10 @@ by actually running it (see Verification); do not trust Python instincts.
 - **Statuses**: `ok` / `error` / `config_error`. Failure *details* live in
   `error` text (throttle vs. decode vs. timeout); don't invent finer status
   enums without a reason.
+- **Multi-sampling**: a task's `samples` N expands every target into N jobs
+  (target-major; `sample` field on each result; provider caps pace the
+  sampling automatically). The judge groups results by provider/model into
+  one candidate with a `samples` list — it ranks models, not samples.
 - **The output JSON schema is a contract** for the grading stage. Add fields;
   don't rename or remove existing ones.
 - **Fatal vs. per-result errors**: fatal errors (bad usage, unreadable
@@ -103,13 +107,34 @@ python3 tests/mock_server.py 8899 &              # start mock (once)
 #              openai-type → http://127.0.0.1:8899/v1 (+ extra provider
 #              "dead" → http://127.0.0.1:9/v1 for conn-refused)
 #   then: cp tests/smoke.json <scratch>/tasks/
+#         cp tests/samples.json <scratch>/
 scriptling runner.py tasks/smoke.json            # expect ok=5 failed=5 across
                                                  # ok/error/config_error paths
+scriptling runner.py samples.json                # multi-sampling: expect
+                                                 # ok=6 failed=3, results with
+                                                 # sample 1..3 per target
+                                                 # (target-major order)
 scriptling runner.py tasks                       # runs the copied smoke.json;
                                                  # subdirs (examples/) are
                                                  # skipped by design - green
 scriptling runner.py tasks/missing.json; echo $? # expect exit 1
 scriptling runner.py;                  echo $?   # expect exit 1 (usage)
+
+# Judge path (same mock; judgejson returns a complete verdict for A..I,
+# matching smoke.json's 9 non-config_error candidates):
+scriptling judge/run.py tasks/smoke.json zai/smoke-judgejson
+                                                 # expect a de-anonymized ranking,
+                                                 # ZERO consistency warnings, and a
+                                                 # judge block (provider/model/
+                                                 # params/judged_at) in judge/out/
+                                                 # smoke-…/verdict-merged.json
+scriptling judge/run.py <that judge/out/smoke-…/verdict.json>
+                                                 # merge mode: same ranking, judge
+                                                 # source "pasted verdict"; a PARTIAL
+                                                 # pasted verdict (some labels/pairs
+                                                 # missing) must print consistency
+                                                 # warnings and record them in
+                                                 # verdict-merged.json's validation
 ```
 
 `tests/smoke.json` covers the full matrix: normal targets (all three provider

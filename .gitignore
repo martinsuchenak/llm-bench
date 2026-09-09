@@ -6,3 +6,4 @@ judge/out/
 tasks/*
 !tasks/examples/
 .DS_Store
+.zcode/

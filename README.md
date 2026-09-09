@@ -147,6 +147,7 @@ stay outside `tasks/` entirely so mock-only targets never mix into real runs.
 | `timeout` | no | `120` | Per-target seconds, enforced by the AI client (no 30s cap). |
 | `max_parallel` | no | config value | Overrides `max_parallel` for this task. Use `1`–`2` for local-only tasks: local backends cold-load models, and simultaneous loads of several models make whichever loses the race fail ("model is loading"/503 — not always the same one). |
 | `targets` | no | `default_targets` | `[{provider, model}]` — override for scenarios that only make sense for certain models. |
+| `samples` | no | `1` | Run every target N times per run (temperature-driven variance / reliability). Results carry a 1-based `sample` field; the judge groups all samples of a model into one candidate and scores its consistency. |
 
 The task id (used in the output filename) is the filename without `.json`.
 
@@ -159,7 +160,10 @@ compression).
 
 ## Output format
 
-One file per run per task: `outputs/<task_id>-<timestamp>.json`.
+One file per run per task: `outputs/<task_id>-<timestamp>.json`. (Timestamps
+have second resolution; if the name already exists — the same task listed
+twice in one invocation, for instance — a `-2`, `-3`, … suffix is appended
+rather than overwriting.)
 
 ```json
 {
@@ -167,7 +171,7 @@ One file per run per task: `outputs/<task_id>-<timestamp>.json`.
   "task_file": "tasks/coding.json",
   "prompt": "…",
   "system": "…",
-  "params": {"max_tokens": 800, "temperature": 0.2, "timeout": 120},
+  "params": {"max_tokens": 800, "temperature": 0.2, "timeout": 120, "samples": 3},
   "targets": [{"provider": "anthropic", "model": "claude-sonnet-4-5"}, "…"],
   "started_at": "2026-08-30T23:47:28.123456",
   "total_elapsed_seconds": 12.01,
@@ -175,6 +179,7 @@ One file per run per task: `outputs/<task_id>-<timestamp>.json`.
   "results": [
     {
       "index": 0,
+      "sample": 1,
       "provider": "anthropic",
       "provider_type": "anthropic",
       "model": "claude-sonnet-4-5",
@@ -199,6 +204,8 @@ One file per run per task: `outputs/<task_id>-<timestamp>.json`.
   blocks stripped, for direct comparison.
 - `retry` appears only on results the client retried (rate limits / server
   errors are retried by default), so retries stay visible to graders.
+- `sample` (with `samples` in `params`): multi-sampled tasks run every target
+  N times; each result carries its 1-based sample number, target-major.
 - API keys and request headers are never written to output.
 
 ## Judging the outputs
@@ -245,8 +252,14 @@ scriptling judge/run.py tasks/coding.json none notes.md   # prepare-only + groun
 
 The verdict carries per-candidate scores on five dimensions (1–5),
 strengths/defects, every pairwise winner with margin, a ranking, confidence,
-and `notes_for_human`. Scenario addenda for the five comparison scenarios are
-built into `judge/prompt.md`.
+and `notes_for_human`. With multi-sampled runs (`samples` > 1), each candidate
+contains all of a model's samples and the judge is instructed to score its
+reliable level, treating variance and mixed failures as defects. Scenario
+addenda for the five comparison scenarios are built into `judge/prompt.md`. `verdict-merged.json` also records which judge
+produced it (`judge`: provider/model/params and time, or the pasted-verdict
+source) and a `validation` list of consistency problems found in the verdict
+(missing candidates, incomplete or duplicated pairwise, malformed ranking;
+an empty list means the verdict is complete and consistent).
 
 ### Judging via CLI tools (no API access)
 
@@ -284,6 +297,7 @@ python3 tests/mock_server.py 8899 &
 | `slow` | sleeps 30s (pair with a short task `timeout`) |
 | `sleep35` | responds after 35s (long-timeout checks) |
 | `empty` | well-formed response with no text |
+| `judgejson` | reply text is a complete mock verdict for labels A–I — use it as a judge target to exercise `judge/run.py`'s judge-call path end to end |
 
 Point a provider's `base_url` at `http://127.0.0.1:8899` (`/v1` for
 anthropic/openai types, `/v1beta` for google) and run any task against it.
@@ -291,8 +305,8 @@ anthropic/openai types, `/v1beta` for google) and run any task against it.
 ## Limitations / notes
 
 - Auto-retry on 429/5xx is on (client default) — visible via the `retry`
-  key. Turn it off in `run_target()` (`max_retries=-1` on `ai.Client`) if
-  you want first-shot-only behavior.
+  key. Tune or disable it per provider in `config.json`
+  (`max_retries` / `retry_backoff`; `-1` disables) — no code edit needed.
 - The stock `requests` library (incl. `requests.parallel`) hard-caps at 30s
   per request in Scriptling 0.22.0 — this is why the transport uses
   `scriptling.ai`, which has no such cap. See AGENTS.md before touching the

@@ -96,39 +96,49 @@ def find_run_file(task_path, outputs_dir):
 
 def build_case(run):
     """Returns (candidates, mapping, excluded, error). config_error results
-    are bench misconfigurations, not model outputs, and are excluded."""
-    included = []
+    are bench misconfigurations, not model outputs, and are excluded.
+    Multi-sampled runs group all results of the same provider/model into one
+    candidate's samples list, so the judge ranks models, not samples."""
+    order = []
+    groups = {}
     excluded = 0
     for r in run.get("results", []):
         if r.get("status") == "config_error":
             excluded = excluded + 1
-        else:
-            included.append(r)
-    if len(included) == 0:
-        return None, None, excluded, "run has no candidate results (all config_error)"
-    if len(included) > len(LABELS):
-        return None, None, excluded, ("run has " + str(len(included)) +
-                                      " candidates, max supported is " + str(len(LABELS)))
-
-    order = shuffled(included)
-    candidates = []
-    mapping = {}
-    for i in range(len(order)):
-        r = order[i]
-        label = LABELS[i]
+            continue
+        key = str(r.get("provider")) + "/" + str(r.get("model"))
+        if key not in groups:
+            groups[key] = {"provider": r.get("provider"), "model": r.get("model"),
+                           "samples": []}
+            order.append(key)
         finish = None
         response = r.get("response")
         if isinstance(response, dict):
             choices = response.get("choices", [])
             if len(choices) > 0:
                 finish = choices[0].get("finish_reason")
-        candidates.append({
-            "label": label,
+        groups[key]["samples"].append({
             "status": r.get("status"),
             "finish_reason": finish,
             "text": r.get("text"),
         })
-        mapping[label] = {"provider": r.get("provider"), "model": r.get("model")}
+    if len(order) == 0:
+        return None, None, excluded, "run has no candidate results (all config_error)"
+    if len(order) > len(LABELS):
+        return None, None, excluded, ("run has " + str(len(order)) +
+                                      " candidates, max supported is " + str(len(LABELS)))
+
+    candidates = []
+    mapping = {}
+    shuffled_order = shuffled(order)
+    for i in range(len(shuffled_order)):
+        g = groups[shuffled_order[i]]
+        label = LABELS[i]
+        candidates.append({
+            "label": label,
+            "samples": g["samples"],
+        })
+        mapping[label] = {"provider": g["provider"], "model": g["model"]}
     return candidates, mapping, excluded, None
 
 
@@ -181,6 +191,79 @@ def is_verdict(d):
     return isinstance(d, dict) and ("ranking" in d or "pairwise" in d)
 
 
+def mapping_labels(mapping):
+    labels = []
+    for k, v in mapping.items():
+        labels.append(k)
+    return sorted(labels)
+
+
+def validate_verdict(verdict, labels):
+    """Consistency checks of a parsed verdict against the sorted candidate
+    labels: every candidate scored, no unknown labels, pairwise covering
+    every unordered pair exactly once, ranking a permutation. Returns a list
+    of human-readable problems (empty = consistent). Warnings, not errors:
+    a partial verdict is still data the human should see flagged, not lose."""
+    problems = []
+    cands = verdict.get("candidates")
+    if not isinstance(cands, dict):
+        problems.append("verdict has no 'candidates' object")
+        cands = {}
+    for label in labels:
+        if label not in cands:
+            problems.append("candidate '" + label + "' has no entry in 'candidates'")
+    for k, v in cands.items():
+        if k not in labels:
+            problems.append("verdict scores unknown label '" + str(k) + "'")
+    seen_pairs = {}
+    pw = verdict.get("pairwise")
+    if not isinstance(pw, list):
+        problems.append("verdict has no 'pairwise' list")
+        pw = []
+    for p in pw:
+        if not isinstance(p, dict):
+            problems.append("pairwise entry is not an object")
+            continue
+        pair = p.get("pair")
+        if not isinstance(pair, list) or len(pair) != 2:
+            problems.append("pairwise entry has no two-element 'pair'")
+            continue
+        a = str(pair[0])
+        b = str(pair[1])
+        if a not in labels or b not in labels:
+            problems.append("pairwise pair '" + a + "/" + b + "' uses an unknown label")
+            continue
+        key = "/".join(sorted([a, b]))
+        if seen_pairs.get(key):
+            problems.append("pairwise pair '" + key + "' appears more than once")
+        else:
+            seen_pairs[key] = True
+    for i in range(len(labels)):
+        for j in range(i + 1, len(labels)):
+            key = labels[i] + "/" + labels[j]
+            if not seen_pairs.get(key):
+                problems.append("pairwise is missing pair '" + key + "'")
+    ranking = verdict.get("ranking")
+    if not isinstance(ranking, list):
+        problems.append("verdict has no 'ranking' list")
+    else:
+        seen_rank = {}
+        for label in ranking:
+            if label not in labels:
+                problems.append("ranking contains unknown label '" + str(label) + "'")
+            elif seen_rank.get(label):
+                problems.append("ranking lists '" + str(label) + "' more than once")
+            else:
+                seen_rank[label] = True
+        for label in labels:
+            if not seen_rank.get(label):
+                problems.append("ranking is missing '" + label + "'")
+    best = verdict.get("best_overall")
+    if best is not None and best not in labels:
+        problems.append("best_overall is unknown label '" + str(best) + "'")
+    return problems
+
+
 def merge_verdict(verdict, mapping):
     merged = {
         "scenario": verdict.get("scenario"),
@@ -212,6 +295,14 @@ def merge_verdict(verdict, mapping):
 
 def print_merged(merged):
     print()
+    judge = merged.get("judge")
+    if isinstance(judge, dict):
+        if judge.get("provider") is not None:
+            print("judge: " + str(judge.get("provider")) + "/" + str(judge.get("model")) +
+                  "  (temperature " + str(judge.get("temperature")) +
+                  ", max_tokens " + str(judge.get("max_tokens")) + ")")
+        else:
+            print("judge: " + str(judge.get("source")) + " (" + str(judge.get("file")) + ")")
     print("ranking (de-anonymized):")
     rank = 1
     for name in merged["ranking"]:
@@ -230,6 +321,11 @@ def print_merged(merged):
     notes = merged.get("notes_for_human")
     if notes:
         print("notes for human: " + str(notes)[:300])
+    validation = merged.get("validation")
+    if isinstance(validation, list) and len(validation) > 0:
+        print("verdict consistency warnings (" + str(len(validation)) + "):")
+        for p in validation:
+            print("  - " + str(p))
 
 
 def main():
@@ -302,6 +398,8 @@ def main():
         mapping_path = os.path.join(os.path.dirname(input_path), "mapping.json")
         mapping = load_json_in_main(mapping_path, "mapping file")
         merged = merge_verdict(input_json, mapping)
+        merged["judge"] = {"source": "pasted verdict", "file": input_path}
+        merged["validation"] = validate_verdict(input_json, mapping_labels(mapping))
         target_dir = os.path.dirname(input_path)
         merged_path = os.path.join(target_dir, "verdict-merged.json")
         os.write_file(merged_path, json.dumps(merged, indent="  "))
@@ -339,7 +437,21 @@ def main():
     prompt = fill_template(template, task_block, candidates, notes_text)
 
     stamp = time.strftime("%Y%m%d-%H%M%S")
-    out_dir = os.path.join(OUT_ROOT, str(run.get("task_id")) + "-" + stamp)
+    # Second-resolution stamps: two invocations in the same second must not
+    # share a directory (the second would overwrite the first's mapping).
+    base_name = str(run.get("task_id")) + "-" + stamp
+    existing = {}
+    try:
+        for n in os.listdir(OUT_ROOT):
+            existing[n] = True
+    except Exception:
+        existing = {}
+    dir_name = base_name
+    n = 2
+    while dir_name in existing:
+        dir_name = base_name + "-" + str(n)
+        n = n + 1
+    out_dir = os.path.join(OUT_ROOT, dir_name)
     os.makedirs(out_dir, exist_ok=True)
 
     os.write_file(os.path.join(out_dir, "prompt.md"), prompt)
@@ -436,7 +548,25 @@ def main():
             os.path.join(out_dir, "judge-response.json"))
     os.write_file(os.path.join(out_dir, "verdict.json"), json.dumps(verdict, indent="  "))
 
+    labels = []
+    for c in candidates:
+        labels.append(c["label"])
+    problems = validate_verdict(verdict, sorted(labels))
+    if len(problems) > 0:
+        print("warning: verdict has " + str(len(problems)) + " consistency problem(s):")
+        for p in problems:
+            print("  - " + p)
+
     merged = merge_verdict(verdict, mapping)
+    merged["judge"] = {
+        "provider": judge_provider,
+        "model": judge_model,
+        "max_tokens": judge_max_tokens,
+        "temperature": judge_temperature,
+        "timeout": judge_timeout,
+        "judged_at": time.now(),
+    }
+    merged["validation"] = problems
     os.write_file(os.path.join(out_dir, "verdict-merged.json"), json.dumps(merged, indent="  "))
     print_merged(merged)
     print()

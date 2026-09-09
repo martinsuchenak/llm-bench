@@ -110,7 +110,10 @@ def run_target(idx, provider, provider_type, base_url, api_key, model,
     except Exception as e:
         msg = str(e)
         if msg.find("context deadline exceeded") != -1 or msg.find("Client.Timeout") != -1:
-            msg = msg + " (hit the " + str(timeout) + "s task timeout - raise 'timeout' in the task file for slow local models, or pre-load the model so loading does not eat the budget)"
+            # The final message cannot distinguish a slow model from a 429/5xx
+            # retry loop that ate the whole budget - both surface as the
+            # deadline error - so the hint must cover both causes.
+            msg = msg + " (hit the " + str(timeout) + "s task timeout - either the model is genuinely slow (raise 'timeout' in the task file, or pre-load the model), or retries of 429/5xx ate the budget (check the provider's error rate; tune max_retries/retry_backoff in config.json))"
         record["error"] = msg[:500]
     record["elapsed_seconds"] = round(time.perf_counter() - t0, 3)
     label = provider + "/" + model
@@ -121,37 +124,45 @@ def run_target(idx, provider, provider_type, base_url, api_key, model,
     return record
 
 
-def build_jobs(task_id, task, config):
-    """Validate targets against config; returns a list of job dicts."""
+def build_jobs(task, config):
+    """Validate targets against config and expand them by the task's sample
+    count (target-major order); returns one job dict per target x sample."""
     providers = config["providers"]
+    samples = task.get("samples", 1)
     jobs = []
     for t in task.get("targets", []):
         provider = t.get("provider", "")
         model = t.get("model", "")
-        job = {"provider": provider, "model": model, "index": len(jobs)}
+        base = {"provider": provider, "model": model}
         pcfg = providers.get(provider)
         if pcfg is None:
-            job["config_error"] = "unknown provider '" + provider + "' (not in config.json)"
+            base["config_error"] = "unknown provider '" + provider + "' (not in config.json)"
         else:
             ptype = pcfg.get("type", "")
             if ptype not in ["anthropic", "google", "openai"]:
-                job["config_error"] = "provider '" + provider + "' has unsupported type '" + str(ptype) + "'"
+                base["config_error"] = "provider '" + provider + "' has unsupported type '" + str(ptype) + "'"
             elif not pcfg.get("base_url", ""):
-                job["config_error"] = "provider '" + provider + "' has no base_url in config.json"
+                base["config_error"] = "provider '" + provider + "' has no base_url in config.json"
             elif not model:
-                job["config_error"] = "target has no model"
+                base["config_error"] = "target has no model"
             else:
                 env_name = pcfg.get("api_key_env", "")
                 # A missing key is not fatal: local servers are often keyless,
                 # and a real provider error comes back as a normal error result.
-                job["api_key"] = (os.getenv(env_name, "") or "") if env_name else ""
-                job["provider_type"] = ptype
-                job["base_url"] = pcfg.get("base_url", "")
+                base["api_key"] = (os.getenv(env_name, "") or "") if env_name else ""
+                base["provider_type"] = ptype
+                base["base_url"] = pcfg.get("base_url", "")
                 if pcfg.get("max_retries") is not None:
-                    job["max_retries"] = pcfg.get("max_retries")
+                    base["max_retries"] = pcfg.get("max_retries")
                 if pcfg.get("retry_backoff") is not None:
-                    job["retry_backoff"] = pcfg.get("retry_backoff")
-        jobs.append(job)
+                    base["retry_backoff"] = pcfg.get("retry_backoff")
+        for s in range(1, samples + 1):
+            job = {}
+            for k, v in base.items():
+                job[k] = v
+            job["sample"] = s
+            job["index"] = len(jobs)
+            jobs.append(job)
     return jobs
 
 
@@ -199,6 +210,10 @@ def run_task(task_path, task, config, out_dir):
         return
 
     task["targets"] = targets
+    samples = task.get("samples", 1)
+    if not isinstance(samples, int) or samples < 1:
+        samples = 1
+    task["samples"] = samples
     max_parallel = task.get("max_parallel", config.get("max_parallel", 4))
     if max_parallel < 1:
         max_parallel = 1
@@ -207,13 +222,18 @@ def run_task(task_path, task, config, out_dir):
     temperature = task.get("temperature", DEFAULT_TEMPERATURE)
     timeout = task.get("timeout", DEFAULT_TIMEOUT)
 
-    jobs = build_jobs(task_id, task, config)
+    jobs = build_jobs(task, config)
     live = [j for j in jobs if "config_error" not in j]
 
     print()
-    print("==> " + task_id + ": " + str(len(jobs)) + " target(s), max_parallel=" +
+    count_text = str(len(targets)) + " target(s)"
+    if samples > 1:
+        count_text = count_text + " x " + str(samples) + " sample(s)"
+    print("==> " + task_id + ": " + count_text + ", max_parallel=" +
           str(max_parallel) + ", timeout=" + str(timeout) + "s")
     for j in jobs:
+        if j["sample"] != 1:
+            continue
         line = "    - " + j["provider"] + "/" + j["model"]
         if "config_error" in j:
             line = line + "  [config error: " + j["config_error"] + "]"
@@ -235,7 +255,10 @@ def run_task(task_path, task, config, out_dir):
         wave_num = wave_num + 1
         inflight = []
         for j in wave:
-            inflight.append(j["provider"] + "/" + j["model"])
+            label = j["provider"] + "/" + j["model"]
+            if samples > 1:
+                label = label + " #" + str(j["sample"])
+            inflight.append(label)
         print("  [wave " + str(wave_num) + "/" + str(wave_total) + "] running: " + ", ".join(inflight))
         promises = []
         for j in wave:
@@ -264,29 +287,35 @@ def run_task(task_path, task, config, out_dir):
     ordered = []
     ok_count = 0
     for j in jobs:
+        sample_suffix = ""
+        if samples > 1:
+            sample_suffix = " #" + str(j["sample"])
         if "config_error" in j:
             record = {
                 "index": j["index"], "provider": j["provider"],
-                "provider_type": None, "model": j["model"],
+                "provider_type": None, "model": j["model"], "sample": j["sample"],
                 "elapsed_seconds": None, "status": "config_error", "text": None,
                 "error": j["config_error"], "response": None, "usage": None,
             }
         else:
             record = results.get(j["index"]) or {
                 "index": j["index"], "provider_type": None, "model": j["model"],
+                "sample": j["sample"],
                 "elapsed_seconds": None, "status": "error", "text": None,
                 "error": "no result returned", "response": None, "usage": None,
             }
             record["provider"] = j["provider"]
+            record["sample"] = j["sample"]
         ordered.append(record)
         if record["status"] == "ok":
             ok_count += 1
             print("    [ok]    " + record["provider"] + "/" + str(record["model"]) +
+                  sample_suffix +
                   "  (" + str(len(record["text"] or "")) + " chars, " +
                   str(record["elapsed_seconds"]) + "s)")
         else:
             print("    [" + record["status"] + "] " + record["provider"] + "/" +
-                  str(record["model"]) + "  " + str(record["error"])[:120])
+                  str(record["model"]) + sample_suffix + "  " + str(record["error"])[:120])
 
     payload = {
         "task_id": task_id,
@@ -297,6 +326,7 @@ def run_task(task_path, task, config, out_dir):
             "max_tokens": max_tokens,
             "temperature": temperature,
             "timeout": timeout,
+            "samples": samples,
         },
         "targets": [{"provider": t.get("provider"), "model": t.get("model")} for t in targets],
         "started_at": started_at,
@@ -306,7 +336,22 @@ def run_task(task_path, task, config, out_dir):
     }
 
     timestamp = time.strftime("%Y%m%d-%H%M%S")
-    out_path = os.path.join(out_dir, task_id + "-" + timestamp + ".json")
+    # Timestamps have second resolution: same-second runs of the same task id
+    # (one task listed twice, or two task dirs with the same basename) must
+    # not overwrite each other's output.
+    base_name = task_id + "-" + timestamp
+    existing = {}
+    try:
+        for n in os.listdir(out_dir):
+            existing[n] = True
+    except Exception:
+        existing = {}
+    file_name = base_name + ".json"
+    n = 2
+    while file_name in existing:
+        file_name = base_name + "-" + str(n) + ".json"
+        n = n + 1
+    out_path = os.path.join(out_dir, file_name)
     os.makedirs(out_dir, exist_ok=True)
     os.write_file(out_path, json.dumps(payload, indent="  "))
 

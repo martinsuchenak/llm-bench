@@ -11,7 +11,11 @@ Model-name directives (substring match) inject failure modes:
   http500  -> respond 500 with a provider-shaped error body
   badjson  -> respond 200 with an unparseable body
   slow     -> sleep 30s (pair with a short task timeout to exercise timeouts)
+  sleep35  -> respond after 35s (long-timeout checks)
   empty    -> respond 200 with a well-formed but text-less body
+  judgejson-> the reply text is a complete, consistent mock verdict for
+              labels A..I (use as a judge target to exercise judge/run.py's
+              judge-call path; pairs with tests/smoke.json's 9 candidates)
 
 Usage: python3 tests/mock_server.py [port]
 """
@@ -19,6 +23,34 @@ import json
 import sys
 import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+
+
+def _mock_verdict():
+    labels = list("ABCDEFGHI")
+    candidates = {}
+    for lab in labels:
+        candidates[lab] = {
+            "outcome": "ok",
+            "scores": {"correctness": 3, "instruction_following": 3,
+                       "completeness": 3, "precision": 3, "communication": 3},
+            "strengths": ["mock strength"],
+            "defects": ["mock defect"],
+        }
+    pairwise = []
+    for i in range(len(labels)):
+        for j in range(i + 1, len(labels)):
+            pairwise.append({"pair": [labels[i], labels[j]],
+                             "winner": labels[i], "margin": "narrow",
+                             "reason": "mock judgement"})
+    return {
+        "scenario": "general",
+        "candidates": candidates,
+        "pairwise": pairwise,
+        "ranking": labels,
+        "best_overall": "A",
+        "confidence": "low",
+        "notes_for_human": "mock verdict from the test server",
+    }
 
 
 class Handler(BaseHTTPRequestHandler):
@@ -93,6 +125,8 @@ class Handler(BaseHTTPRequestHandler):
             return
 
         text = "Mock reply from " + model
+        if "judgejson" in model:
+            text = json.dumps(_mock_verdict())
 
         if path == "/v1/messages":
             self._send(200, {

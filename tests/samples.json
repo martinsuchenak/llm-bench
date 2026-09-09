@@ -1,0 +1,12 @@
+{
+  "prompt": "multi-sampling smoke test - verifies sample expansion (target-major), per-sample statuses, and judge-side grouping by model",
+  "max_tokens": 64,
+  "temperature": 0.5,
+  "timeout": 3,
+  "samples": 3,
+  "targets": [
+    {"provider": "anthropic", "model": "samples-claude"},
+    {"provider": "google", "model": "samples-gemini"},
+    {"provider": "zai", "model": "samples-http500"}
+  ]
+}
