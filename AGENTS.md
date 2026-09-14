@@ -30,7 +30,8 @@ by actually running it (see Verification); do not trust Python instincts.
 
 - **Transport is `scriptling.ai` (`ai.Client`), NOT `requests`/`requests.parallel`.**
   Chosen because the stock `requests` library hard-caps every request at 30s
-  (`pool/pool.go` DefaultConfig in Scriptling 0.22.0) — unusable for real LLM
+  (`pool/pool.go` DefaultConfig; measured on 0.22.0, still true on 0.25.1) —
+  unusable for real LLM
   generations — while the `scriptling.ai` client honors per-call `timeout`
   with no cap (own transport, 10-minute default). Trade-off accepted by the
   owner: responses are the client's **normalized** completion dicts rather
@@ -53,7 +54,7 @@ by actually running it (see Verification); do not trust Python instincts.
   config/task files) must `die()` from `main()`'s own frame — see the exit
   code quirk below. Per-target problems are always result records.
 
-## Scriptling rules that bite (all empirically verified on 0.22.0)
+## Scriptling rules that bite (verified on 0.22.0; full suite re-run green on 0.25.1)
 
 1. **No pathlib for path strings.** `str(Path)` and `print(Path)` yield
    `<Path object at 0x…>`. Use plain strings with `os.listdir`,

@@ -6,8 +6,8 @@ models in parallel, and collect raw, comparable results as JSON for later
 scoring — blind pairwise comparison, LLM-as-judge, or human review.
 
 Written in [Scriptling](https://scriptling.dev), a sandboxed Python-like
-language. Runs on the stock `scriptling` CLI (0.22.0+); no patched build or
-extra runtime required.
+language. Runs on the stock `scriptling` CLI (0.22.0+; verified through
+0.25.1); no patched build or extra runtime required.
 
 Licensed under the [MIT License](LICENSE).
 
@@ -308,7 +308,8 @@ anthropic/openai types, `/v1beta` for google) and run any task against it.
   key. Tune or disable it per provider in `config.json`
   (`max_retries` / `retry_backoff`; `-1` disables) — no code edit needed.
 - The stock `requests` library (incl. `requests.parallel`) hard-caps at 30s
-  per request in Scriptling 0.22.0 — this is why the transport uses
+  per request (verified on Scriptling 0.22.0 and 0.25.1) — this is why the
+  transport uses
   `scriptling.ai`, which has no such cap. See AGENTS.md before touching the
   transport.
 - `runner.py` is Scriptling, not Python: it looks like Python but must obey
