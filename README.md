@@ -281,6 +281,58 @@ private until the verdict is in, so the judging stays blind.
 When reviewing, treat non-`ok` candidates by their error detail (throttle vs.
 safety filter vs. timeout) rather than as uniform failures.
 
+## Agent harness: does a code index actually help?
+
+`agent-runner.py` is a separate A/B experiment harness built on the same
+repo: it measures whether giving a coding agent access to code-intelligence
+(skopos MCP + steering) makes it **faster, cheaper, or better** — same agent,
+same model, same task; the only variable is the tool layer.
+
+- **Arms** are [phantom](https://github.com/martinsuchenak/phantom) overlay
+  contents: `baseline` gets the plain repo, `skopos` gets a project-scope
+  skopos install written into the overlay before the agent starts. No HOME
+  config flipping, symmetric isolation.
+- **Corpus** lives outside git by default (`.local/corpus/*.json`, set
+  `corpus_dirs` in `agents.json`) — task ground truth is private to the repos
+  you benchmark. Generic anatomy templates ship in
+  `tasks/agents/examples/`. Each task carries its own
+  checker (machine-verified) and oracle (known-good solution). A task only
+  counts as defined once `validate` proves red → oracle → green **without
+  any agent involved** — that check costs zero agent tokens.
+- **Metrics** per run: wall time, turns, input/output/cache tokens, cost,
+  tool calls by name (parsed from the agent's own stream-json), tier-1
+  pass/fail, changed files. Stats are per task and per task type, medians +
+  IQRs — never a blended average.
+
+```bash
+cp agents.example.json agents.json   # repos + pinned refs, agent command, arms
+scriptling agent-runner.py -- doctor
+scriptling agent-runner.py -- validate
+scriptling agent-runner.py -- run --reps 5        # real agent spend starts HERE
+```
+
+The `--` separator is required (the scriptling CLI eats unknown flags).
+`run` is the only mode that spends agent tokens; `doctor` and `validate`
+never do. Results land in `outputs/agents-<ts>/` (full per-run records in
+`results.json`, aggregates in `summary.json`); open-ended tasks can then be
+blind-judged with `judge/run.py` as tier 2.
+
+Any headless agent CLI works — swap `agent.command`/`agent.model` in
+`agents.json`. The metrics parser understands both claude's
+`--output-format stream-json` and opencode's `run --format json` dialects;
+opencode with a local LM Studio model (`agents.example.json` carries the
+`*_local_free` variants) runs the whole experiment for zero API cost. When
+driving opencode, set `SKOPOS_INSTALL_AGENT=opencode` in `.env` so the
+skopos arm installs MCP config in opencode's flavor.
+
+The measured outcome of running this harness across four repos (256 →
+12,633 files), two models, and four code-intelligence providers — including
+the regime where an index demonstrably beats plain grep — is in
+[INDEX_EFFECTIVENESS_REPORT.md](INDEX_EFFECTIVENESS_REPORT.md) (repos
+anonymized). The full experiment design — repetition rules, arm-order
+alternation, both index-cost framings, per-type reporting — is pre-registered
+in `.local/` design notes.
+
 ## Testing without API keys
 
 `tests/mock_server.py` fakes all three provider dialects and injects

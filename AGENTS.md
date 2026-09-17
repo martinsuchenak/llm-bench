@@ -23,7 +23,13 @@ by actually running it (see Verification); do not trust Python instincts.
 | `tasks/examples/*.json` | The five shipped scenario examples (coding, code-review, test-running, feature-design, summarization). Directory scans are NOT recursive: `runner.py tasks` never picks these up; run them explicitly via `tasks/examples`. Test-only tasks (mock-provider `smoke.json`, `samples.json`) live in `tests/` for the same reason. |
 | `judge/prompt.md` | LLM-as-judge prompt: blind comparison rubric + strict-JSON verdict. Placeholders `{{TASK}}`/`{{CANDIDATES}}`/`{{NOTES}}`; candidates must be anonymized (provider/model stripped, random labels) before judging. |
 | `judge/run.py` | Judge automation: task/run file → latest run → anonymized+shuffled candidates → judge call via `scriptling.ai` → verdict + de-anonymized merge into `judge/out/` (gitignored). Also accepts a pasted judge verdict as input (raw JSON or a CLI reply with prose/fences) and merges it with the sibling `mapping.json` — merge mode for CLI-tool judges (claude/gemini/kiro). Same fatal-die-in-main-frame rule as runner.py; fatal validation lives only in `main()`. |
-| `outputs/` | Generated results (gitignored). |
+| `agent-runner.py` | The A/B harness: measures whether code-intelligence (skopos MCP) makes AI coding agents faster/cheaper/better. Modes `doctor`/`validate`/`run` — note the required `--` separator (scriptling's CLI eats unknown flags). Zero agent tokens unless `run` is invoked. |
+| `agents.example.json` | Harness config template: `repos` (path + pinned ref), `agent` (command template with `{instruction_file}`/`{model}`), `arms`, `default_arms`, `phantom_bin`, `output_dir`. Committed. |
+| `agents.json` | Live harness config, copied from the example. **Gitignored.** Skopos arm needs `SKOPOS_MCP_URL`/`SKOPOS_API_KEY` in `.env`. |
+| `tasks/agents/examples/` | Generic corpus TEMPLATES (committed) — anatomy docs + lookup/feature/bugfix examples referencing a fictional repo. NOT runnable as-is. |
+| `.local/corpus/*.json` | The real bench corpus (gitignored — private ground truth). Same anatomy: `type`/`repo`/`instruction`/`setup`/`checker`/`oracle`/`timeout_min`; support files in `.local/corpus/files/`, referenced via `{files_dir}`. Located via `corpus_dirs` in `agents.json` (default `[.local/corpus]`). |
+| `arms/*.sh` | One prep script per arm; runs inside the overlay mount before the agent. baseline = plain repo; skopos = project-scope `skopos install`. An arm IS its prep script + overlay contents. |
+| `outputs/` | Generated results (gitignored). Agent runs land in `outputs/agents-<ts>/` (results.json, summary.json, logs/). |
 | `tests/mock_server.py` | Python stdlib mock of all three provider dialects, with failure- and judge-mode directives. Test infrastructure only. |
 
 ## Architecture (deliberate decisions — don't undo without cause)
@@ -53,6 +59,32 @@ by actually running it (see Verification); do not trust Python instincts.
 - **Fatal vs. per-result errors**: fatal errors (bad usage, unreadable
   config/task files) must `die()` from `main()`'s own frame — see the exit
   code quirk below. Per-target problems are always result records.
+
+### agent-runner harness (A/B code-index effectiveness)
+
+Design source of truth: `.local/index-effectiveness-harness.md` (gitignored).
+Deviations from it, all deliberate:
+
+- The harness runs the agent itself as a subprocess with cwd = overlay mount
+  (NOT `phantom run`): task setup and arm prep must execute inside the
+  overlay between creation and agent start, and phantom run couples the two.
+  phantom stays the overlay/diff/cleanup layer (`start`/`diff`/`stop`).
+- Checkers run in the harness, not via phantom hooks: direct result
+  retrieval, and hooks.yaml is global (~/.phantom) which risks cross-arm
+  contamination.
+- `validate` proves MORE than the doc requires: checker must FAIL on a fresh
+  overlay (red) before the oracle makes it pass (green) — an oracle passing
+  an already-green test proves nothing and hides difficulty calibration.
+- Repos are pinned by ref via a **pristine detached git worktree** under
+  `.local/repos/<name>-<ref12>/` (phantom overlays the WORKING TREE, so the
+  user's real checkout and its WIP must never be the base). Doctor enforces
+  HEAD == ref and a clean tree.
+- Bugfix tasks seed their defect: `setup` applies a seed patch (generated
+  with git in a throwaway overlay — never dirty the base repo), the oracle
+  patch reverses it; both live in the corpus `files/` dir next to the task.
+- Ground truth for exact-answer tasks must be UNCONTESTED between grep and
+  the index (e.g. "callers of ids.New" is disqualified: the index's
+  name-based edges conflate uuid.New/ids.New, grep finds 5 files, index ~15).
 
 ## Scriptling rules that bite (verified on 0.22.0; full suite re-run green on 0.25.1)
 
@@ -93,6 +125,30 @@ by actually running it (see Verification); do not trust Python instincts.
    separately, dict iteration via `.items()`. Lint with
    `scriptling --lint runner.py` — editor Python LSP errors on
    `os.read_file`/`time.now`/`scriptling.*` are false positives.
+8. **No backslash line-continuations** (parser error: ILLEGAL). Continue
+   long expressions only inside parentheses (call args, parens); no `try/finally`
+   either — restructure so cleanup runs after the except block. No
+   `os.popen`, no `os.getpid`, `time.now()` returns a STRING (no arithmetic).
+9. **subprocess.run works but has sharp edges** (all verified on 0.25.1):
+   `cwd=`/exit-code passthrough fine; `capture_output` captures stdout only
+   (stderr is force-dropped — the command itself must `2>&1`); the `timeout`
+   kwarg is SILENTLY IGNORED (wrap commands in a shell watchdog:
+   exec + sleep/kill, exit 124); and if ANY backgrounded process inherits
+   the stdout pipe (your watchdog, or a daemon the command spawns), the call
+   DEADLOCKS forever in pthread_cond_wait — route output through a temp
+   file and `cat` it from the main shell (see `run_cmd` in agent-runner.py).
+10. **The scriptling CLI parses unknown `--flags` itself** and rejects them
+    before the script runs ("unknown flag: --reps", exit 0 thanks to quirk
+    #2). Scripts that take flags need the literal `--` separator:
+    `scriptling agent-runner.py -- run --reps 5`.
+11. `__file__` is RELATIVE when invoked as `scriptling foo.py` from the
+    script's directory, so `os.path.dirname(__file__)` can be `""` —
+    absolutize SCRIPT_DIR against `os.getcwd()` before deriving paths that
+    subprocesses (with different cwd) must resolve.
+12. JSON null defeats `.get(key, default)`: when the key EXISTS with value
+    null, the default is NOT used, and iterating the result raises
+    "expected iterable, got NULL" (phantom diff emits `"files": null` for an
+    unchanged overlay). Guard with `or []` / isinstance.
 
 ## Verification
 
@@ -136,6 +192,21 @@ scriptling judge/run.py <that judge/out/smoke-…/verdict.json>
                                                  # missing) must print consistency
                                                  # warnings and record them in
                                                  # verdict-merged.json's validation
+
+# agent-runner (needs the local env: phantom on PATH, agents.json pointing at
+# a pristine pinned worktree in .local/repos/, .env with SKOPOS_* vars):
+scriptling agent-runner.py;                 echo $?   # expect exit 1 (usage)
+scriptling agent-runner.py -- doctor                 # expect all checks [ok ]
+scriptling agent-runner.py -- validate               # expect Nx red -> oracle ->
+                                                     # green (N = corpus size),
+                                                     # exit 0, ZERO agent tokens
+scriptling agent-runner.py -- run --reps 1 --task <corpus-task-id> \
+  --arm baseline                                     # REAL agent spend; smoke
+                                                     # cheaply by temporarily
+                                                     # setting agents.json
+                                                     # agent.command to "cat {instruction_file}"
+                                                     # (tier1 FAIL + ok status =
+                                                     # machinery works)
 ```
 
 `tests/smoke.json` covers the full matrix: normal targets (all three provider

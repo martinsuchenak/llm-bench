@@ -1,9 +1,17 @@
 .env
 config.json
+agents.json
 outputs/
 judge/out/
 # Real bench tasks stay private (public repo); only tasks/examples/ is committed
 tasks/*
 !tasks/examples/
+# Agent-harness corpus: generic examples only; real corpora live in .local/corpus/ (gitignored)
+!tasks/agents/
+tasks/agents/*
+!tasks/agents/examples/
 .DS_Store
 .zcode/
+.local/
+.skopos/
+.skopos-session

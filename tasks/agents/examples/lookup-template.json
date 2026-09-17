@@ -1,0 +1,13 @@
+{
+  "type": "lookup",
+  "repo": "widgets",
+  "timeout_min": 15,
+  "instruction": "TEMPLATE - fill in for your repo. Example shape (duplicated-helper lookup): 'This repository defines an unexported helper function named `<name>` in several packages. Identify EVERY file that defines a function named exactly `<name>`. Create a file named ANSWER.txt in the repository root containing the repo-relative path of each such file, one path per line, sorted alphabetically. Use forward slashes and no leading `./`. The file must contain nothing except those paths.'",
+  "setup": [],
+  "checker": {
+    "mode": "exact_set",
+    "file": "ANSWER.txt",
+    "answer": ["src/one/real_file.go", "src/two/other_file.go"]
+  },
+  "oracle": { "mode": "answer_file" }
+}

@@ -1,0 +1,17 @@
+{
+  "type": "feature",
+  "repo": "widgets",
+  "timeout_min": 25,
+  "instruction": "TEMPLATE - fill in for your repo. Example shape (small feature with a placed test): 'Package `<pkg>` does X but cannot Y. Implement `<NewFunc>` in package `<pkg>` following the existing house style. A test file has been added at `<pkg>/extra_test.go` that pins the contract. Make `<test command>` pass. Do not modify, move, or delete any `_test.go` file.'",
+  "setup": [
+    "cp {files_dir}/my-task_extra_test.go path/in/repo/extra_test.go"
+  ],
+  "checker": {
+    "mode": "exit0",
+    "command": "go test ./path/in/repo/ -run TestNewFunc -count=1"
+  },
+  "oracle": {
+    "mode": "patch",
+    "file": "{files_dir}/my-task.oracle.patch"
+  }
+}

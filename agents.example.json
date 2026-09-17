@@ -1,0 +1,38 @@
+{
+  "repos": {
+    "widgets": {
+      "path": "/Users/you/code/widgets",
+      "ref": "full-commit-sha-you-pin"
+    }
+  },
+  "agent": {
+    "command": "cat {instruction_file} | claude --print --dangerously-skip-permissions --output-format stream-json --verbose --model {model}",
+    "model": "sonnet",
+    "command_local_free": "cat {instruction_file} | opencode run --format json --model {model}",
+    "model_local_free": "lmstudio/<your-local-model>"
+  },
+  "arms": {
+    "baseline": {
+      "prep": "arms/baseline.sh"
+    },
+    "skopos": {
+      "prep": "arms/skopos.sh"
+    },
+    "codegraph": {
+      "prep": "arms/codegraph.sh"
+    },
+    "graphmind": {
+      "prep": "arms/graphmind.sh"
+    }
+  },
+  "default_arms": [
+    "baseline",
+    "skopos"
+  ],
+  "corpus_dirs": [
+    ".local/corpus"
+  ],
+  "phantom_bin": "phantom",
+  "max_parallel": 1,
+  "output_dir": "outputs"
+}

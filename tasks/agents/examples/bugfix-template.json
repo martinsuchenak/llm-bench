@@ -1,0 +1,18 @@
+{
+  "type": "bugfix",
+  "repo": "widgets",
+  "timeout_min": 25,
+  "instruction": "TEMPLATE - fill in for your repo. Example shape (seeded regression): 'A regression slipped into this repository: <area> handling is broken. `<check command>` currently fails. Find the defect and fix it so the check passes. Do not modify, move, or delete any test/check file.'",
+  "setup": [
+    "git apply {files_dir}/my-task.seed.patch",
+    "cp {files_dir}/my-task_check.php path/in/repo/extra_check.php"
+  ],
+  "checker": {
+    "mode": "exit0",
+    "command": "php path/in/repo/extra_check.php"
+  },
+  "oracle": {
+    "mode": "patch",
+    "file": "{files_dir}/my-task.oracle.patch"
+  }
+}
